@@ -1,0 +1,10 @@
+numpy
+pandas
+pyarrow
+scipy
+numba
+shapely>=2
+folium
+requests
+gtfs-realtime-bindings
+protobuf
