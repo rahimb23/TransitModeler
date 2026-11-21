@@ -41,6 +41,7 @@ def export_static(out: str, days: int = 3, live_url: str | None = None, feeds=No
                            "realtime": bool(f.trip_updates_url or f.vehicle_positions_url) and not f.rt_key_env}
                        for k, f in FEEDS.items()}}
     stops_written = False
+    shape_index = None
     for d in dates:
         t0 = time.time()
         net = Network(d, feeds=feeds)
@@ -60,6 +61,9 @@ def export_static(out: str, days: int = 3, live_url: str | None = None, feeds=No
                 "feed": r["feed"].map({k: i for i, k in enumerate(net.feeds)}).tolist(),
                 "short": r["route_short_name"].tolist(), "long": r["route_long_name"].tolist(),
                 "type": r["route_type"].astype(int).tolist(),
+                "color": [("#" + c.strip().lstrip("#")) if len(c.strip().lstrip("#")) == 6
+                          and c.strip().lstrip("#").upper() not in ("FFFFFF", "000000") else FEEDS[f].color
+                          for c, f in zip(r["route_color"].fillna(""), r["feed"])],
             })
             stops_written = (net.feeds, n_stops)
         elif stops_written != (net.feeds, n_stops):
@@ -70,11 +74,15 @@ def export_static(out: str, days: int = 3, live_url: str | None = None, feeds=No
         os.makedirs(ddir, exist_ok=True)
         t = net.trips
         heads, hidx = np.unique(t["trip_headsign"].fillna("").to_numpy().astype(str), return_inverse=True)
+        if shape_index is None:
+            shape_index = export_shapes(data, net.feeds, log=log)
+        shp = [shape_index.get(f, {}).get(sid, -1) for f, sid in zip(t["feed"], t["shape_id"].fillna(""))]
         _write_json(os.path.join(ddir, "trips.json"), {
             "route": t["route_idx"].astype(int).tolist(), "headsigns": heads.tolist(),
             "headsign": hidx.astype(int).tolist(), "id": t["trip_id"].tolist(),
             "prev": (t["day_shift"] != 0).astype(int).tolist(),
             "feed": t["feed"].map({k: i for i, k in enumerate(net.feeds)}).astype(int).tolist(),
+            "shape": shp,
         })
         keep = net.c_dep >= 0
         dep, arr = net.c_dep[keep], net.c_arr[keep]
@@ -242,3 +250,37 @@ def export_lines(data_dir: str, feeds=None, tolerance_m: float = 8.0, log=print)
         size = os.path.getsize(os.path.join(data_dir, "lines", f"{cat}.json"))
         log(f"  lines/{cat}.json: {len(items)} routes, {size / 1e6:.2f} MB")
     return {c: len(v) for c, v in out.items()}
+
+
+def export_shapes(data_dir: str, feeds, tolerance_m: float = 5.0, log=print) -> dict:
+    """Write data/shapes/<feed>.json (delta-encoded 1e-5 degree paths) for every shape used by
+    a trip, so the site can draw trip legs along the real route. Returns {feed: {shape_id: idx}}."""
+    import pandas as pd
+    import shapely
+
+    from .feeds import CACHE_DIR
+    from .network import project, unproject
+
+    index = {}
+    for key in feeds:
+        p = os.path.join(CACHE_DIR, key, "shapes.parquet")
+        if not os.path.exists(p):
+            continue
+        sh = pd.read_parquet(p)
+        used = set(pd.read_parquet(os.path.join(CACHE_DIR, key, "trips.parquet"))["shape_id"])
+        ids, paths = [], []
+        for sid, g in sh.groupby("shape_id", sort=False):
+            if sid not in used or len(g) < 2:
+                continue
+            line = shapely.simplify(shapely.linestrings(project(g["lat"].to_numpy(), g["lon"].to_numpy())),
+                                    tolerance_m)
+            lat, lon = unproject(shapely.get_coordinates(line))
+            q = np.column_stack([np.round(lat * 1e5), np.round(lon * 1e5)]).astype(int)
+            d = np.vstack([q[:1], np.diff(q, axis=0)])
+            ids.append(sid)
+            paths.append(d.ravel().tolist())
+        _write_json(os.path.join(data_dir, "shapes", f"{key}.json"), {"p": paths})
+        index[key] = {sid: i for i, sid in enumerate(ids)}
+        size = os.path.getsize(os.path.join(data_dir, "shapes", f"{key}.json"))
+        log(f"  shapes/{key}.json: {len(ids)} shapes, {size / 1e6:.2f} MB")
+    return index

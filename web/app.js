@@ -60,6 +60,8 @@ const IsoLayer = L.Layer.extend({
 });
 const iso = new IsoLayer().addTo(map);
 const tripLayer = L.layerGroup().addTo(map);
+map.createPane('trip').style.zIndex = 460;
+const tripRenderer = L.canvas({pane: 'trip', padding: 0.3});
 const vehLayer = L.layerGroup();
 const markers = L.layerGroup().addTo(map);
 
@@ -306,8 +308,9 @@ function journey(R, stop) {
       const route = ri >= 0 ? (S.routes.short[ri] || S.routes.long[ri]) : '';
       const type = ri >= 0 ? S.routes.type[ri] : 3;
       const delay = R.live ? (S.liveMap[R.date + '|' + (S.live ? S.live.epoch : 0)] || {delay: []}).delay[tr] || 0 : 0;
-      legs.push({walk: false, feed, route, mode: MODES[type] || 'Transit', head: R.trips.headsigns[R.trips.headsign[tr]],
-        from: C.from[ce], to: v, dep: C.dep[ce], arr: C.arr[cx], stops, delay});
+      const color = ri >= 0 && S.routes.color ? S.routes.color[ri] : feedColor(feed);
+      legs.push({walk: false, feed, route, color, mode: MODES[type] || 'Transit', head: R.trips.headsigns[R.trips.headsign[tr]],
+        from: C.from[ce], to: v, dep: C.dep[ce], arr: C.arr[cx], stops, delay, trip: tr, shape: R.trips.shape ? R.trips.shape[tr] : -1});
       v = C.from[ce];
     }
   }
@@ -350,8 +353,9 @@ async function run() {
   if (id !== runId) return;
   S.last = R;
   drawMarkers();
-  if (S.mode === 'trip') { iso.setData(null); return showTrip(R); }
+  if (S.mode === 'trip') { iso.setData(null); return showTrip(R, id); }
   tripLayer.clearLayers();
+  map.getPane('lines').style.opacity = 1;
   // circles: every reached stop + origin
   const reached = [];
   for (let s = 0; s < R.tau.length; s++) if (R.tau[s] <= R.t1) reached.push(s);
@@ -404,8 +408,71 @@ async function run() {
     <table class="small">${top.map(([s, d]) => `<tr><td>${esc(S.stops.name[s])}</td><td class="n">${(d / 1000).toFixed(1)} km</td><td class="n">${Math.round((R.tau[s] - t0) / 60)} min</td></tr>`).join('')}</table>`;
 }
 
-function showTrip(R) {
+
+// ---------------------------------------------------------------- snapping legs to route shapes
+const shapeFiles = {};
+function loadShapes(feed) {
+  if (!shapeFiles[feed]) {
+    shapeFiles[feed] = getJSON(`data/shapes/${feed}.json`).then(d => d.p.map(dl => {
+      const n = dl.length / 2, x = new Float64Array(n), y = new Float64Array(n), lat = new Float64Array(n), lon = new Float64Array(n);
+      let la = 0, lo = 0;
+      for (let i = 0; i < n; i++) {
+        la += dl[2 * i]; lo += dl[2 * i + 1]; lat[i] = la / 1e5; lon[i] = lo / 1e5;
+        const p = proj(lat[i], lon[i]); x[i] = p[0]; y[i] = p[1];
+      }
+      return {x, y, lat, lon, n};
+    })).catch(() => null);
+  }
+  return shapeFiles[feed];
+}
+
+// Project point (px,py) onto segment i of shape; returns [distance, t in 0..1].
+function segProj(sh, i, px, py) {
+  const ax = sh.x[i], ay = sh.y[i], dx = sh.x[i + 1] - ax, dy = sh.y[i + 1] - ay, L = dx * dx + dy * dy;
+  let t = L > 0 ? ((px - ax) * dx + (py - ay) * dy) / L : 0;
+  t = Math.max(0, Math.min(1, t));
+  return [Math.hypot(ax + t * dx - px, ay + t * dy - py), t];
+}
+
+const SNAP_MAX = 150;  // metres: farther than this and we don't trust the snap
+
+// Snap the leg's stops onto the shape *in order* (so loops and out-and-back routes don't jump),
+// then return the shape geometry between consecutive stops. Falls back to straight lines.
+function legGeometry(sh, stops) {
+  const straight = stops.map(s => [S.lat[s], S.lon[s]]);
+  if (!sh || sh.n < 2) return straight;
+  const pos = [];  // [segment, t] per stop
+  let from = 0;
+  for (const s of stops) {
+    const px = S.x[s], py = S.y[s];
+    let best = Infinity;
+    const d = new Float64Array(sh.n - 1).fill(Infinity);
+    for (let i = from; i < sh.n - 1; i++) { d[i] = segProj(sh, i, px, py)[0]; if (d[i] < best) best = d[i]; }
+    if (best > SNAP_MAX) { pos.push(null); continue; }
+    // first segment (going forward) that is nearly as close as the best one
+    let k = from; while (d[k] > best + 20) k++;
+    const t = segProj(sh, k, px, py)[1];
+    // never step backwards along the shape
+    if (pos.length && pos[pos.length - 1] && (k < pos[pos.length - 1][0] || (k === pos[pos.length - 1][0] && t < pos[pos.length - 1][1]))) { pos.push(null); continue; }
+    pos.push([k, t]); from = k;
+  }
+  const at = (k, t) => [sh.lat[k] + t * (sh.lat[k + 1] - sh.lat[k]), sh.lon[k] + t * (sh.lon[k + 1] - sh.lon[k])];
+  const out = [straight[0]];
+  for (let j = 1; j < stops.length; j++) {
+    const a = pos[j - 1], b = pos[j];
+    if (a && b) {
+      out.push(at(a[0], a[1]));
+      for (let k = a[0] + 1; k <= b[0]; k++) out.push([sh.lat[k], sh.lon[k]]);
+      out.push(at(b[0], b[1]));
+    }
+    out.push(straight[j]);
+  }
+  return out;
+}
+
+async function showTrip(R, id) {
   tripLayer.clearLayers();
+  map.getPane('lines').style.opacity = S.dest ? 0.3 : 1;
   if (!S.dest) { $('out').innerHTML = '<p class="muted">Now click the map (or search) to choose a destination.</p>'; return; }
   const [dx, dy] = proj(S.dest[0], S.dest[1]);
   let best = null;
@@ -428,21 +495,24 @@ function showTrip(R) {
     const toLL = [S.lat[l.to], S.lon[l.to]];
     if (l.walk) {
       const fromLL = l.from == null ? prev : [S.lat[l.from], S.lon[l.from]];
-      L.polyline([fromLL, toLL], {color: '#6b6a65', weight: 3, dashArray: '6 6'}).addTo(tripLayer);
+      L.polyline([fromLL, toLL], {renderer: tripRenderer, color: '#1f1f1d', weight: 3, dashArray: '2 6', lineCap: 'round'}).addTo(tripLayer);
       const m = Math.round((l.arr - l.dep) / 60);
       if (m >= 1) items.push(`<li class="walk"><span class="t">${fmt(l.dep)}</span>Walk ${m} min to ${esc(S.stops.name[l.to])}</li>`);
     } else {
-      const pts = l.stops.map(s => [S.lat[s], S.lon[s]]);
-      L.polyline(pts, {color: feedColor(l.feed), weight: 6, opacity: .9})
-        .bindTooltip(`${l.feed.toUpperCase()} ${esc(l.route)} · ${esc(l.head)}`).addTo(tripLayer);
+      const shapes = l.shape >= 0 ? await loadShapes(l.feed) : null;
+      if (id !== runId) return;  // a newer search replaced this one while shapes loaded
+      const pts = legGeometry(shapes ? shapes[l.shape] : null, l.stops);
+      L.polyline(pts, {renderer: tripRenderer, color: '#ffffff', weight: 11, opacity: 1, interactive: false}).addTo(tripLayer);
+      L.polyline(pts, {renderer: tripRenderer, color: l.color, weight: 7, opacity: 1})
+        .bindTooltip(`${l.feed.toUpperCase()} ${esc(l.route)} · ${esc(l.head)}`, {sticky: true}).addTo(tripLayer);
       const dl = Math.abs(l.delay) >= 30 ? ` <span class="${l.delay > 0 ? 'late' : 'early'}">${l.delay > 0 ? '+' : '−'}${Math.round(Math.abs(l.delay) / 60)} min</span>` : '';
-      items.push(`<li style="border-left-color:${feedColor(l.feed)}"><span class="t">${fmt(l.dep)}</span>
+      items.push(`<li style="border-left-color:${l.color}"><span class="t">${fmt(l.dep)}</span>
         <b>${l.feed.toUpperCase()} ${esc(l.mode)} ${esc(l.route)}</b>${dl}<br><span class="small">${esc(l.head)}</span><br>
         <span class="small muted">${esc(S.stops.name[l.from])} → ${esc(S.stops.name[l.to])} · ${l.stops.length - 1} stops · arr ${fmt(l.arr)}</span></li>`);
     }
     prev = toLL;
   }
-  L.polyline([prev, S.dest], {color: '#6b6a65', weight: 3, dashArray: '6 6'}).addTo(tripLayer);
+  L.polyline([prev, S.dest], {renderer: tripRenderer, color: '#1f1f1d', weight: 3, dashArray: '2 6', lineCap: 'round'}).addTo(tripLayer);
   items.push(`<li class="walk"><span class="t">${fmt(best.t - best.eg)}</span>Walk ${Math.round(best.eg / 60)} min to destination</li>`);
   $('out').innerHTML = `<p class="summary">Arrive ${fmt(best.t)} · ${Math.round((best.t - R.t0) / 60)} min${R.live ? ' · live' : ''}</p><ul class="legs">${items.join('')}</ul>`;
   const b = tripLayer.getLayers().reduce((acc, l) => acc.extend(l.getBounds()), L.latLngBounds([[R.lat, R.lon], S.dest]));
