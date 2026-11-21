@@ -63,6 +63,43 @@ const tripLayer = L.layerGroup().addTo(map);
 const vehLayer = L.layerGroup();
 const markers = L.layerGroup().addTo(map);
 
+// ---------------------------------------------------------------- route lines
+// Drawn above the isochrone canvas, below markers.
+map.createPane('lines').style.zIndex = 450;
+const lineRenderer = L.canvas({pane: 'lines', padding: 0.3, tolerance: 4});
+const LINE_STYLE = {
+  subway: {weight: 5, opacity: 0.95}, lrt: {weight: 4.5, opacity: 0.95}, streetcar: {weight: 3, opacity: 0.85},
+  train: {weight: 4, opacity: 0.9, dashArray: '10 4'}, bus: {weight: 1.6, opacity: 0.55},
+};
+const LINE_LABEL = {subway: 'Subway', lrt: 'LRT', streetcar: 'Streetcar', train: 'GO Train', bus: 'Bus'};
+const lineLayers = {};
+async function toggleLines(cat, on) {
+  if (!lineLayers[cat]) {
+    lineLayers[cat] = (async () => {
+      const items = await getJSON(`data/lines/${cat}.json`);
+      const g = L.layerGroup(), st = LINE_STYLE[cat];
+      for (const r of items) {
+        const latlngs = r.p.map(d => {
+          const pts = []; let la = 0, lo = 0;
+          for (let i = 0; i < d.length; i += 2) { la += d[i]; lo += d[i + 1]; pts.push([la / 1e5, lo / 1e5]); }
+          return pts;
+        });
+        const name = `${r.f.toUpperCase()} ${LINE_LABEL[cat]} ${r.s}${r.l && r.l !== r.s ? ' · ' + r.l : ''}`;
+        L.polyline(latlngs, {renderer: lineRenderer, color: r.c, ...st})
+          .bindTooltip(esc(name), {sticky: true}).addTo(g);
+      }
+      return g;
+    })();
+  }
+  const g = await lineLayers[cat];
+  if (on) g.addTo(map); else map.removeLayer(g);
+  // keep rapid transit on top of buses
+  for (const c of ['streetcar', 'lrt', 'train', 'subway']) if (c !== cat && lineLayers[c]) lineLayers[c].then(l => map.hasLayer(l) && l.eachLayer(x => x.bringToFront()));
+}
+document.querySelectorAll('#lines input').forEach(cb => {
+  cb.addEventListener('change', () => toggleLines(cb.dataset.cat, cb.checked));
+});
+
 // ---------------------------------------------------------------- utils
 const fmt = s => { s = ((s % 86400) + 86400) % 86400; return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}`; };
 const proj = (lat, lon) => [(lon + 79.4) * MLON, (lat - LAT0) * MLAT];
@@ -130,6 +167,7 @@ async function init() {
     sel.appendChild(o);
   }
   if (S.index.dates.some(d => d.date === today)) sel.value = today;
+  document.querySelectorAll('#lines input').forEach(cb => { if (cb.checked) toggleLines(cb.dataset.cat, true); });
   setNow();
   readHash();
   await loadLive();

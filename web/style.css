@@ -60,3 +60,10 @@ a { color: var(--accent); }
 @media (max-width: 600px) {
   #panel { top: auto; bottom: 0; left: 0; width: 100%; max-width: 100%; border-radius: 12px 12px 0 0; max-height: 55vh; padding: 10px 16px; }
 }
+
+fieldset#lines { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0 0; padding: 6px 10px 8px;
+  display: flex; flex-wrap: wrap; gap: 4px 14px; }
+fieldset#lines legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+fieldset#lines label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.ln { display: inline-block; width: 16px; height: 4px; border-radius: 2px; }
+.ln.thin { height: 2px; }

@@ -38,6 +38,7 @@ Routing runs entirely in your browser, using the same Connection Scan Algorithm 
 - **Reach:** click anywhere (or search a stop) to see 15/30/45/60-minute reach.
 - **Trip:** pick an origin and a destination.
 - **Share:** links keep their state in the URL.
+- **Transit lines:** an overlay you can toggle by mode: Subway, LRT, Streetcar, GO Train and Bus routes. It uses each agency's official route colours from `shapes.txt`. Hover a line to see its name.
 
 Two GitHub Actions keep the site up to date:
 
@@ -49,7 +50,9 @@ Two GitHub Actions keep the site up to date:
 1. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
 2. *(Optional)* Add your Metrolinx key as the repository secret `GO_API_KEY` to get live GO delays.
 
-GitHub may run scheduled workflows late, and the raw file is cached for about 5 minutes. In practice, live data on the site is usually 5–20 minutes old. GitHub also pauses scheduled workflows after 60 days without repository activity; re-enable them from the Actions tab.
+GitHub may run scheduled workflows late, and the raw file is cached for about 5 minutes. In practice, live data on the site is usually 5–20 minutes old.
+
+TTC's BusTime server doesn't accept connections from GitHub's runners, so on the website TTC runs on its schedule. The other real-time agencies are live. TTC live data still works when you run the Python model or `serve` from your own machine. Running `live.yml` on a self-hosted runner would also bring TTC to the site. GitHub also pauses scheduled workflows after 60 days without repository activity; re-enable them from the Actions tab.
 
 To preview locally:
 

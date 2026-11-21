@@ -14,7 +14,7 @@ import requests
 
 from .feeds import CACHE_DIR, FEEDS, RAW_DIR, Feed
 
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 def _hms_to_sec(s: pd.Series) -> np.ndarray:
@@ -85,10 +85,22 @@ def preprocess(feed: Feed, force: bool = False) -> str:
     routes = routes[["route_id", "route_short_name", "route_long_name", "route_type", "route_color"]]
 
     trips = _read(z, "trips.txt")
-    for c in ("trip_headsign", "direction_id"):
+    for c in ("trip_headsign", "direction_id", "shape_id"):
         if c not in trips:
             trips[c] = ""
-    trips = trips[["trip_id", "route_id", "service_id", "trip_headsign", "direction_id"]].reset_index(drop=True)
+    trips = trips[["trip_id", "route_id", "service_id", "trip_headsign", "direction_id", "shape_id"]
+                  ].reset_index(drop=True)
+
+    shapes = _read(z, "shapes.txt", usecols={"shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"})
+    if shapes is not None and len(shapes):
+        shapes = pd.DataFrame({
+            "shape_id": shapes["shape_id"],
+            "lat": pd.to_numeric(shapes["shape_pt_lat"], errors="coerce"),
+            "lon": pd.to_numeric(shapes["shape_pt_lon"], errors="coerce"),
+            "seq": pd.to_numeric(shapes["shape_pt_sequence"], errors="coerce"),
+        }).dropna().sort_values(["shape_id", "seq"], kind="stable").reset_index(drop=True)
+    else:
+        shapes = pd.DataFrame({"shape_id": [], "lat": [], "lon": [], "seq": []})
 
     st = _read(z, "stop_times.txt",
                usecols={"trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence"})
@@ -188,6 +200,7 @@ def preprocess(feed: Feed, force: bool = False) -> str:
     stops.to_parquet(os.path.join(out, "stops.parquet"))
     routes.to_parquet(os.path.join(out, "routes.parquet"))
     trips.to_parquet(os.path.join(out, "trips.parquet"))
+    shapes.to_parquet(os.path.join(out, "shapes.parquet"))
     df.reset_index(drop=True).to_parquet(os.path.join(out, "stop_times.parquet"))
     svc.reset_index(drop=True).to_parquet(os.path.join(out, "services.parquet"))
     agency = _read(z, "agency.txt")

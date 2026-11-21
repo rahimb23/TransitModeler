@@ -99,6 +99,7 @@ def export_static(out: str, days: int = 3, live_url: str | None = None, feeds=No
                                "midnight": net.midnight})
         log(f"  {ds}: {len(t):,} trips, {int(keep.sum()):,} connections, {total / 1e6:.1f} MB "
             f"({time.time() - t0:.1f}s)")
+    index["lines"] = export_lines(data, feeds, log=log)
     _write_json(os.path.join(data, "index.json"), index)
 
 
@@ -144,3 +145,100 @@ def export_live(out_file: str, feeds=None, log=print):
     _write_json(out_file, payload)
     log(f"live: {len(payload['delays'])} delayed trips, {len(payload['cancelled'])} cancelled, "
         f"{len(payload.get('vehicles', {}).get('lat', []))} vehicles -> {out_file}")
+
+
+# ----------------------------------------------------------------------------- route lines
+LINE_CATEGORIES = ["subway", "lrt", "streetcar", "train", "bus"]
+
+
+def route_category(feed: str, rtype: int, short: str, long: str) -> str:
+    if rtype in (1, 12):
+        return "subway"
+    if rtype == 0:
+        # TTC files Lines 5/6 (LRT) under the same type as streetcars.
+        if feed == "ttc" and not (short in ("5", "6") or long.lower().startswith("line")):
+            return "streetcar"
+        return "lrt"
+    if rtype == 2:
+        return "train"
+    return "bus"
+
+
+def export_lines(data_dir: str, feeds=None, tolerance_m: float = 8.0, log=print):
+    """Write data/lines/<category>.json with one simplified geometry per route direction."""
+    import pandas as pd
+    import shapely
+
+    from .feeds import CACHE_DIR
+    from .network import project, unproject
+
+    out = {c: [] for c in LINE_CATEGORIES}
+    merged = {}  # (feed, category, short name) -> entry; some feeds split a line over several route_ids
+    for key in feeds or FEEDS:
+        p = os.path.join(CACHE_DIR, key)
+        if not os.path.exists(os.path.join(p, "shapes.parquet")):
+            continue
+        routes = pd.read_parquet(os.path.join(p, "routes.parquet"))
+        trips = pd.read_parquet(os.path.join(p, "trips.parquet"))
+        shapes = pd.read_parquet(os.path.join(p, "shapes.parquet"))
+        stops = pd.read_parquet(os.path.join(p, "stops.parquet"))
+        st = None
+        sh_groups = {k: g for k, g in shapes.groupby("shape_id")} if len(shapes) else {}
+        for r in routes.itertuples():
+            rt = trips[trips["route_id"] == r.route_id]
+            if rt.empty:
+                continue
+            cat = route_category(key, int(r.route_type), str(r.route_short_name), str(r.route_long_name))
+            mkey = (key, cat, r.route_short_name or r.route_long_name)
+            entry = merged.get(mkey)
+            geoms = entry["geoms"] if entry else []
+            n_before = len(geoms)
+            for _, grp in rt.groupby("direction_id"):
+                sid = grp["shape_id"].replace("", pd.NA).dropna()
+                coords = None
+                if len(sid) and sid.mode().iloc[0] in sh_groups:
+                    g = sh_groups[sid.mode().iloc[0]]
+                    coords = g[["lat", "lon"]].to_numpy()
+                else:  # no shape: connect the stops of the longest trip
+                    if st is None:
+                        st = pd.read_parquet(os.path.join(p, "stop_times.parquet"))
+                    ti = trips.index[trips["trip_id"].isin(grp["trip_id"])]
+                    sub = st[st["t"].isin(ti)]
+                    if sub.empty:
+                        continue
+                    longest = sub.groupby("t").size().idxmax()
+                    s_idx = sub[sub["t"] == longest].sort_values("seq")["s"].to_numpy()
+                    coords = stops.iloc[s_idx][["stop_lat", "stop_lon"]].to_numpy()
+                if coords is None or len(coords) < 2:
+                    continue
+                line = shapely.simplify(shapely.linestrings(project(coords[:, 0], coords[:, 1])), tolerance_m)
+                if any(shapely.equals(line, g) or shapely.hausdorff_distance(line, g) < 30 for g in geoms):
+                    continue  # the other direction runs on the same streets
+                geoms.append(line)
+            if entry:
+                entry["new"] += geoms[n_before:]
+                continue
+            if not geoms:
+                continue
+            color = (r.route_color or "").strip().lstrip("#")
+            if len(color) != 6 or color.upper() in ("FFFFFF", "000000"):
+                color = FEEDS[key].color.lstrip("#")
+            entry = {"f": key, "s": r.route_short_name, "l": r.route_long_name, "c": "#" + color,
+                     "geoms": geoms, "new": list(geoms)}
+            merged[mkey] = entry
+            out[cat].append(entry)
+    for cat, items in out.items():
+        for e in items:
+            paths = []
+            for g in e.pop("new"):
+                lat, lon = unproject(shapely.get_coordinates(g))
+                q = np.column_stack([np.round(lat * 1e5), np.round(lon * 1e5)]).astype(int)
+                d = np.vstack([q[:1], np.diff(q, axis=0)])  # delta-encode
+                paths.append(d.ravel().tolist())
+            e.pop("geoms")
+            e["p"] = paths
+    for cat, items in out.items():
+        _write_json(os.path.join(data_dir, "lines", f"{cat}.json"), items)
+        size = os.path.getsize(os.path.join(data_dir, "lines", f"{cat}.json"))
+        log(f"  lines/{cat}.json: {len(items)} routes, {size / 1e6:.2f} MB")
+    return {c: len(v) for c, v in out.items()}
