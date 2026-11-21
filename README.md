@@ -29,6 +29,46 @@ A multi-agency GTFS + GTFS-Realtime model of transit across the Greater Toronto 
 
 **GO real-time:** register for a free key with Metrolinx Open Data, then `export GO_API_KEY=...`.
 
+## Website (GitHub Pages)
+
+**https://rahimb23.github.io/TransitModeler/**
+
+Routing runs entirely in your browser, using the same Connection Scan Algorithm as the Python model:
+
+- **Reach:** click anywhere (or search a stop) to see 15/30/45/60-minute reach.
+- **Trip:** pick an origin and a destination.
+- **Share:** links keep their state in the URL.
+
+Two GitHub Actions keep the site up to date:
+
+- **`pages.yml`** runs daily and on every push to `main`. It downloads all the agencies' GTFS and exports the next 3 days of schedules as hourly binary chunks (about 1 MB each). It then deploys the site from `web/` to Pages.
+- **`live.yml`** runs about every 10 minutes. It fetches the GTFS-Realtime feeds and works out each trip's current delay and cancellations, plus vehicle positions. It force-pushes the result as `live.json` to the `live` branch. The agencies' feeds don't allow browser requests (no CORS headers), so the site reads `live.json` from raw.githubusercontent.com instead.
+
+### One-time setup
+
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
+2. *(Optional)* Add your Metrolinx key as the repository secret `GO_API_KEY` to get live GO delays.
+
+GitHub may run scheduled workflows late, and the raw file is cached for about 5 minutes. In practice, live data on the site is usually 5–20 minutes old. GitHub also pauses scheduled workflows after 60 days without repository activity; re-enable them from the Actions tab.
+
+To preview locally:
+
+```bash
+python -m gta_transit export-web --out _site --live-url live/live.json
+```
+
+```bash
+python -m gta_transit export-live --out _site/live/live.json
+```
+
+```bash
+cp web/* _site/
+```
+
+```bash
+python -m http.server -d _site 8000
+```
+
 ## Setup
 
 ```bash

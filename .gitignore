@@ -1,3 +1,4 @@
-data/
-out/
+data
+_site/
+live_out/
 __pycache__/

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GTA Transit Reach</title>
+<meta name="description" content="How far can you get by transit across the Greater Toronto and Hamilton Area? Live isochrones and trip planning across TTC, GO, MiWay, YRT, Brampton, Durham, HSR, Oakville and Burlington.">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map" aria-label="Map"></div>
+<aside id="panel">
+  <header>
+    <h1>GTA Transit Reach</h1>
+    <button id="collapse" class="icon" aria-label="Collapse panel" title="Collapse">–</button>
+  </header>
+  <div id="body">
+    <div class="seg" role="tablist">
+      <button id="modeReach" class="on" role="tab">Reach</button>
+      <button id="modeTrip" role="tab">Trip</button>
+    </div>
+    <p id="hint" class="muted">Click the map, or search a stop, to see how far transit gets you.</p>
+    <div class="search">
+      <input id="q" type="search" placeholder="Search stops (e.g. Union, Square One)" autocomplete="off">
+      <ul id="results" hidden></ul>
+    </div>
+    <div class="row">
+      <label>Date <select id="date"></select></label>
+      <label>Depart <input id="time" type="time"></label>
+      <button id="now" class="ghost">Now</button>
+    </div>
+    <div class="row">
+      <label>Bands (min) <input id="bands" value="15,30,45,60" size="11"></label>
+    </div>
+    <div class="row checks">
+      <label><input type="checkbox" id="live" checked> Live delays</label>
+      <label><input type="checkbox" id="veh"> Live vehicles</label>
+    </div>
+    <div id="out"></div>
+    <details id="about">
+      <summary>About</summary>
+      <p>Schedules from the open GTFS feeds of TTC, GO Transit, MiWay, Brampton Transit, YRT, Durham Region Transit,
+      HSR, Oakville Transit and Burlington Transit. Routing runs in your browser (Connection Scan Algorithm) with
+      walking transfers up to 400&nbsp;m. Live delays come from the agencies' GTFS-Realtime feeds, refreshed about
+      every 10 minutes. Walking is straight-line × 1.3 at 4.7&nbsp;km/h; fares are ignored.</p>
+      <p><a href="https://github.com/rahimb23/TransitModeler">Source on GitHub</a></p>
+    </details>
+    <div id="status" class="muted small"></div>
+  </div>
+</aside>
+<script src="app.js"></script>
+</body>
+</html>

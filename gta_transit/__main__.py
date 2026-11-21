@@ -164,6 +164,16 @@ def cmd_serve(args):
     serve(args.port, args.host, args.refresh, feeds=args.feeds.split(",") if args.feeds else None)
 
 
+def cmd_export_web(args):
+    from .webexport import export_static
+    export_static(args.out, args.days, args.live_url, feeds=args.feeds.split(",") if args.feeds else None)
+
+
+def cmd_export_live(args):
+    from .webexport import export_live
+    export_live(args.out, feeds=args.feeds.split(",") if args.feeds else None)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="gta_transit", description="GTA multi-agency GTFS network model")
     p.add_argument("--feeds", help="comma-separated subset, e.g. ttc,go,miway (default: all)")
@@ -219,6 +229,16 @@ def main(argv=None):
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--refresh", type=int, default=60, help="realtime refresh seconds")
     s.set_defaults(fn=cmd_serve)
+
+    s = sub.add_parser("export-web", help="export schedule data for the static website")
+    s.add_argument("--out", default="_site")
+    s.add_argument("--days", type=int, default=3)
+    s.add_argument("--live-url", help="URL of live.json for the site to poll")
+    s.set_defaults(fn=cmd_export_web)
+
+    s = sub.add_parser("export-live", help="write a live delay/vehicle snapshot for the website")
+    s.add_argument("--out", default="live/live.json")
+    s.set_defaults(fn=cmd_export_live)
 
     args = p.parse_args(argv)
     args.fn(args)

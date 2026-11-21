@@ -1,0 +1,50 @@
+name: Publish live delays
+
+# Fetches the agencies' GTFS-Realtime feeds, works out each trip's current delay and
+# force-pushes a small live.json to the `live` branch. The website reads it from
+# raw.githubusercontent.com (which allows cross-origin requests; the agency feeds don't).
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live
+  cancel-in-progress: true
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restore GTFS cache from the last site build
+        uses: actions/cache/restore@v4
+        with:
+          path: data/cache
+          key: gtfs-cache-latest
+          restore-keys: gtfs-cache-
+      - name: Build GTFS cache if missing
+        if: hashFiles('data/cache/ttc/meta.json') == ''
+        run: python -m gta_transit update
+      - name: Fetch realtime and export snapshot
+        run: python -m gta_transit export-live --out live_out/live.json
+        env:
+          GO_API_KEY: ${{ secrets.GO_API_KEY }}
+      - name: Push to live branch
+        run: |
+          cd live_out
+          git init -q -b live
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add live.json
+          git commit -q -m "Live snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" live
