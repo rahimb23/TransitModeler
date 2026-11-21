@@ -1,5 +1,7 @@
 # TransitModeler: GTA Transit Network Model
 
+**▶ Open the live map: [rahimb23.github.io/TransitModeler](https://rahimb23.github.io/TransitModeler/)**
+
 A multi-agency GTFS + GTFS-Realtime model of transit across the Greater Toronto and Hamilton Area. It does:
 
 - **Real-time schedules**: live delays and cancellations are applied to every trip that has a real-time feed.
