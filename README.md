@@ -8,7 +8,8 @@ A multi-agency GTFS + GTFS-Realtime model of transit across the Greater Toronto 
 - **Departure boards and a live vehicle map.**
 - **A web app** where you click anywhere to see live reachability (shift-click to plan a trip).
 
-![60-minute reach from Union Station](docs/isochrone_union.png)
+![Website: reach from Union with transit lines](docs/web_live.png)
+![Python model: 60-minute reach from Union](docs/isochrone_union.png)
 ![Web app](docs/web_app.png)
 
 ## Agencies
