@@ -97,7 +97,9 @@ async function toggleLines(cat, on) {
   for (const c of ['streetcar', 'lrt', 'train', 'subway']) if (c !== cat && lineLayers[c]) lineLayers[c].then(l => map.hasLayer(l) && l.eachLayer(x => x.bringToFront()));
 }
 document.querySelectorAll('#lines input').forEach(cb => {
-  cb.addEventListener('change', () => toggleLines(cb.dataset.cat, cb.checked));
+  const go = () => toggleLines(cb.dataset.cat, cb.checked).catch(e => status('Could not load ' + cb.dataset.cat + ' lines: ' + e.message));
+  cb.addEventListener('change', go);
+  if (cb.checked) go();
 });
 
 // ---------------------------------------------------------------- utils
@@ -167,7 +169,6 @@ async function init() {
     sel.appendChild(o);
   }
   if (S.index.dates.some(d => d.date === today)) sel.value = today;
-  document.querySelectorAll('#lines input').forEach(cb => { if (cb.checked) toggleLines(cb.dataset.cat, true); });
   setNow();
   readHash();
   await loadLive();
@@ -193,7 +194,7 @@ async function loadTrips(date) {
 async function loadChunk(date, h) {
   const key = date + '/' + h;
   if (!S.chunks[key]) {
-    S.chunks[key] = fetch(`data/${date}/c${String(h).padStart(2, '0')}.bin`).then(async r => {
+    S.chunks[key] = fetch(`data/${date}/c${String(h).padStart(2, '0')}.bin`, {cache: 'no-cache'}).then(async r => {
       if (!r.ok) return null;
       const buf = await r.arrayBuffer(), n = new DataView(buf).getUint32(0, true);
       return {h, n, off: new Uint16Array(buf, 4, n), dur: new Uint16Array(buf, 4 + 2 * n, n),

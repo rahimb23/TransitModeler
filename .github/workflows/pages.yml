@@ -34,6 +34,10 @@ jobs:
           python -m gta_transit export-web --out _site --days 3 \
             --live-url "https://raw.githubusercontent.com/${{ github.repository }}/live/live.json"
           cp web/* _site/
+          # cache-bust code so browsers never pair a new page with an old script
+          v="${GITHUB_SHA::8}"
+          sed -i "s#app.js\"#app.js?v=$v\"#; s#style.css\"#style.css?v=$v\"#" _site/index.html
+          grep -E "app.js|style.css" _site/index.html
           touch _site/.nojekyll
           du -sh _site
       - name: Save GTFS cache for the live updater
